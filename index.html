@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Log Book</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="app.min.css">
+  <style>
+    .uppercase {
+    }
+  </style>
+</head>
+
+<body class="app-android">
+  <div class="app-page" data-page="home">
+    <div class="app-topbar blue">
+      <div class="app-title">Home</div>
+    </div>
+    <div class="app-content">
+      <div class="app-section">
+        <div class="app-button" data-target="new-entry">Begin new trip</div>
+        <div class="app-button" data-target="finish-trip">Finish trip</div>
+        <div class="app-button" data-target="trips">Synchronize trips</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-page" data-page="new-entry">
+    <div class="app-topbar red">
+      <div class="app-button left" data-back data-autotitle></div>
+      <div class="app-title">New trip</div>
+    </div>
+    <div class="app-content">
+      <div class="app-section">
+        <input class="app-input" name="start_date" id="start_date" placeholder="Start date">
+        <input class="app-input uppercase" name="rego" id="rego" placeholder="Registration number">
+      </div>
+      <div class="app-section">
+        <input class="app-input" type="number" name="odo_start" id="odo_start" placeholder="Odometer reading" />
+        <input class="app-input" name="purpose" id="purpose" placeholder="Purpose of trip">
+        <div class="app-button blue" id="create-new-trip" clickable-class="active">Start new trip</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-page" data-page="finish-trip">
+    <div class="app-topbar teal">
+      <div class="app-button left" data-back data-autotitle></div>
+      <div class="app-title">Finish trip</div>
+    </div>
+    <div class="app-content">
+      <div class="app-section">
+        <input type="hidden" id="trip_id" value="" />
+        <input type="text" class="app-input" id="purpose" readonly value="Purpose: " />
+        <input class="app-input" name="end_date" id="end_date" placeholder="End date">
+        <input class="app-input" type="number" name="odo_end" id="odo_end" placeholder="Odometer reading" />
+        <div class="app-button red" id="finish-trip" clickable-class="active">Finish trip</div>
+        <div class="app-button" id="cancel-trip" clickable-class="active">Cancel trip</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-page" data-page="trips">
+    <div class="app-topbar teal">
+      <div class="app-button left" data-back data-autotitle></div>
+      <div class="app-title">Trip log</div>
+    </div>
+    <div class="app-content">
+      <ul class="app-list" id="job-list">
+      </ul>
+      <div class="app-button blue" id="synchronize-list" clickable-class="active">Synchronize logs</div>
+    </div>
+  </div>
+
+  <script src="zepto.js"></script>
+  <script src="app.min.js"></script>
+  <script src="store.min.js"></script>
+  <script src="db.js"></script>
+  <script>
+  App.controller('home', function (page) {
+    // put stuff here
+  });
+
+  App.controller('trips', function(page){
+
+    this.restorable = false;
+
+    //Get list of finished trips.
+    var trips = db.getTrips();
+    if ( trips.length < 1 ) {
+
+      App.load('home');
+      App.dialog({
+        title: "Whoops",
+        text: "There are no logs to view.",
+        okButton: "Ok"
+      });
+
+      return false;
+
+    }
+
+    //Inject the logs.
+    var buffer = "";
+    for ( var i=0; i<trips.length; i++ ) {
+      buffer = "";
+
+      buffer = '<li data-tripId="' + trips[i].tripId + '">' + trips[i].end_date + ': <strong>' + trips[i].distance + 'KM</strong></li>';
+
+      $(page).find('#job-list').html( $(page).find('#job-list').html() + buffer );
+    }
+
+  });
+
+  App.controller('finish-trip', function(page) {
+
+    this.restorable = false;
+
+    var date = getCurrentDate();
+    var lastTrip = db.getLatestTrip();
+    if ( ! lastTrip ) {
+      App.load('new-entry');
+      App.dialog({
+        title: "Whoops",
+        text: "There was no existing trip found. You'll need to start a new one.",
+        okButton: "Ok"
+      });
+      return false
+    }
+
+    $(page).find('#purpose').val( 'Purpose: ' + lastTrip.purpose );
+    $(page).find('#end_date').val( date );
+
+    $(page).find('#cancel-trip').on('click', function(){
+
+      App.dialog({
+        title: "Confirm deletion",
+        text: "Are you sure to want to cancel this trip? Data will be deleted.",
+        okButton: "Delete",
+        cancelButton: "Keep trip"
+      }, function( del ){
+        if ( del ) {
+
+          db.deleteTrip(lastTrip.tripId);
+          App.load('home');
+
+          return true;
+        }
+      });
+
+    });
+
+    $(page).find('#finish-trip').on('click', function(){
+
+      var end_date = $(page).find('#end_date').val();
+      var end_odo = $(page).find('#odo_end').val();
+      var errMSg;
+
+      if ( end_odo < lastTrip.start_odo ) {
+        errMsg = "Your odemeter reading cannot be lower than when you started the trip.";
+      } else {
+        errMsg = "Please fill in all of the fields to end this trip";
+      }
+
+      if (! end_date || ! end_odo || end_odo < lastTrip.start_odo ) {
+
+        App.dialog({
+          title: "Error",
+          text: errMsg,
+          okButton: "Edit",
+          cancelButton: "Cancel"
+        }, function(tryAgain){
+          if (! tryAgain ) {
+            db.deleteTrip(lastTrip.tripId);
+            App.load('home');
+            return false;
+          }
+          return true;
+        });
+
+        return false;
+
+      }
+
+      db.finishTrip(lastTrip.tripId,{
+        end_date: end_date,
+        end_odo: end_odo
+      });
+      App.dialog({
+        title: "Success",
+        text: "Your trip has been logged locally.",
+        okButton: "Awesome"
+      });
+      App.load('home');
+
+    });
+
+
+  });
+
+  App.controller('new-entry', function (page) {
+
+    //Is there a non finished trip?
+    var latestTrip = db.getLatestTrip();
+    if ( latestTrip ) {
+      App.load('finish-trip');
+      App.dialog({
+        title: "Whoops",
+        text: "There's currently an unfinished trip. You'll need to finish it or cancel it first.",
+        okButton: "Ok"
+      });
+
+      return false;
+    }
+
+    this.restorable = false;
+
+    var date = getCurrentDate();
+    var rego = getDefaultRego();
+
+    //No:
+    $(page).find('#start_date').val( date );
+    $(page).find('#rego').val( rego );
+
+    $(page).find('#create-new-trip').on('click', function(){
+
+      var tripData = {
+        start_date: $(page).find('#start_date').val(),
+        rego: $(page).find('#rego').val(),
+        start_odo: $(page).find('#odo_start').val(),
+        purpose: $(page).find('#purpose').val()
+      };
+
+      for ( key in tripData ) {
+        if ( tripData.hasOwnProperty(key) ) {
+          if (! tripData[key] || tripData[key] == "" ) {
+            App.dialog({
+              title: "Missing data",
+              text: "Please fill in all of the fields to begin the trip",
+              okButton: "Edit",
+              cancelButton: "Cancel"
+            }, function(tryAgain){
+              if (! tryAgain ) {
+                App.load('home');
+                return false;
+              }
+              return true;
+            });
+
+            return false;
+
+          }
+        }
+      }
+
+      window.db.insertNewTrip(tripData);
+      App.load('finish-trip');
+
+    });
+
+
+  });
+
+  function getDefaultRego() {
+    return 'UNA878';
+  }
+
+  function getCurrentDate() {
+
+    var d = new Date,
+    dformat = [ d.getDate(),
+               d.getMonth()+1
+              ,
+               d.getFullYear()].join('/')+' '+
+              d.getHours() + ':' +
+               d.getMinutes();
+
+    return dformat;
+
+  };
+
+  try {
+    App.restore();
+  } catch (err) {
+    App.load('home');
+  }
+  </script>
+</body>
+</html>

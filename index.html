@@ -7,12 +7,22 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="app.min.css">
   <style>
-    .uppercase {
+    .loading {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 99999;
+      background: url('loading.gif') center center no-repeat rgba(0,0,0,0.85);
+      display: none;
     }
   </style>
 </head>
 
 <body class="app-android">
+  <div id="loading" class="loading"></div>
+
   <div class="app-page" data-page="home">
     <div class="app-topbar blue">
       <div class="app-title">Home</div>
@@ -69,7 +79,11 @@
     <div class="app-content">
       <ul class="app-list" id="job-list">
       </ul>
-      <div class="app-button blue" id="synchronize-list" clickable-class="active">Synchronize logs</div>
+      <div class="app-section">
+        <input class="app-input" id="server-uri" name="server-uri" placeholder="Server URI (http://server.com/push)" />
+        <input class="app-input" id="server-pass" name="server-pass" type="password" placeholder="Password *" />
+        <div class="app-button blue" id="synchronize-list" clickable-class="active">Synchronize logs</div>
+      </div>
     </div>
   </div>
 
@@ -78,6 +92,67 @@
   <script src="store.min.js"></script>
   <script src="db.js"></script>
   <script>
+
+  var syncLock = false;
+
+  function switchLoading(stat) {
+    if ( typeof stat === 'undefined' ) stat = 'on';
+
+    if ( stat === 'on' ) {
+      $('#loading').show();
+    } else {
+      $('#loading').hide();
+    }
+
+  }
+
+  function tryToSynchronize(uri,pass,data,callback) {
+
+    if ( ! uri || uri == "" || ! pass || pass == "" || ! callback ) {
+      console.error("Invalid call to tryToSynchronize, missing args.");
+      return false;
+    }
+
+    if ( syncLock === true ) {
+      console.error("Synchronize already in progress, syncLock blocked request.");
+      return false;
+    }
+
+    syncLock = true;
+
+    var cleanData = {};
+
+    for ( var i=0; i<data.length; i++ ) {
+      cleanData[data[i].tripId] = data[i];
+    };
+
+    var postObject = {
+      pass: pass,
+      data: cleanData
+    };
+
+    var jsonData = JSON.stringify( postObject );
+
+    $.ajax({
+      url: uri,
+      type: "POST",
+      data: postObject,
+      success: function(data) {
+        callback(false,data);
+        syncLock = false;
+        switchLoading('off');
+      },
+      error: function(xhr, type) {
+        callback(type,null);
+        syncLock = false;
+        switchLoading('off');
+      }
+    });
+
+
+  };
+
+
   App.controller('home', function (page) {
     // put stuff here
   });
@@ -85,6 +160,66 @@
   App.controller('trips', function(page){
 
     this.restorable = false;
+
+    $(page).find('#synchronize-list').on('click', function(){
+
+      var serverURI = $(page).find('#server-uri').val();
+      var pass = $(page).find('#server-pass').val();
+      if (! serverURI || serverURI == "" || ! pass || pass == "" ) {
+        App.dialog({
+          title: "Whoops",
+          text: "No server URI or password specified. Please enter a remote end point and password to do that.",
+          okButton: "Gotcha"
+        });
+        return false;
+      }
+
+      db.setDefaultEndpoint(serverURI);
+      db.setDefaultPass(pass);
+
+      var tripsToSynchronize = db.getTrips();
+
+      switchLoading('on');
+
+      tryToSynchronize(serverURI,pass,tripsToSynchronize, function(err,res) {
+        switchLoading('off');
+
+        try {
+          res = JSON.parse(res);
+        } catch( error ){
+          err = true;
+        }
+
+        if ( err ) {
+          App.dialog({
+            title: "Error occured",
+            text: "An error occured while trying to synchronize: " + err,
+            okButton: "OK"
+          });
+          return false;
+        }
+
+        if ( res.status == 1 ) {
+
+          //Success.
+          //Delete all "finished" trips from local storage.
+          db.clearFinishedTrips();
+
+          App.dialog({
+            title: "Success",
+            text: "Your trips have been synchronized with the server!",
+            okButton: "OK"
+          });
+
+          App.load('home');
+
+          return true;
+
+        }
+
+      });
+
+    });
 
     //Get list of finished trips.
     var trips = db.getTrips();
@@ -106,10 +241,14 @@
     for ( var i=0; i<trips.length; i++ ) {
       buffer = "";
 
-      buffer = '<li data-tripId="' + trips[i].tripId + '">' + trips[i].end_date + ': <strong>' + trips[i].distance + 'KM</strong></li>';
+      buffer = '<li data-tripId="' + trips[i].tripId + '">' + trips[i].end_date + ': <strong>' + trips[i].distance + 'KM</strong> <em>(' + trips[i].rego + ')</em></li>';
 
       $(page).find('#job-list').html( $(page).find('#job-list').html() + buffer );
     }
+
+    //Default URI endpoint
+    $(page).find('#server-uri').val( db.getDefaultEndpoint() );
+    $(page).find('#server-pass').val( db.getDefaultPass() );
 
   });
 
@@ -263,7 +402,7 @@
   });
 
   function getDefaultRego() {
-    return 'UNA878';
+    return db.getLastRego();
   }
 
   function getCurrentDate() {

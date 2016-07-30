@@ -13,10 +13,13 @@
     tripData.lastUpdate = new Date().getTime();
     tripData.tripId = tripId;
     tripData.stat = "begin";
+    tripData.rego = tripData.rego.toUpperCase();
 
     store.set('job_' + tripId,tripData);
     store.set('most_recent_trip', tripId);
     store.set('trip_active', true);
+
+    db.setLastRego(tripData.rego);
 
     return tripId;
 
@@ -88,6 +91,56 @@
 
     return trips;
 
+  };
+
+  db.getLastRego = function() {
+
+    var rego = store.get('last_rego');
+
+    return rego;
+
+  };
+
+  db.setLastRego = function( rego ) {
+
+    store.set('last_rego', rego);
+
+  };
+
+  db.setDefaultEndpoint = function(uri) {
+
+    store.set('endpoint', uri);
+
+  };
+
+  db.getDefaultEndpoint = function() {
+    return store.get('endpoint');
+  };
+
+  db.setDefaultPass = function(pass) {
+
+    store.set('pass', pass);
+
+  };
+
+  db.getDefaultPass = function() {
+    return store.get('pass');
+  };
+
+  db.clearFinishedTrips = function() {
+
+    var trips = db.getTrips();
+
+    for ( var i=0; i<trips.length; i++ ) {
+      if ( trips[i].stat == 'finished' ) {
+        db.deleteTrip(trips[i].tripId);
+      }
+    }
+
+  };
+
+  db.deleteTrip = function(tripId) {
+    store.remove('job_' + tripId);
   };
 
 })(window);
